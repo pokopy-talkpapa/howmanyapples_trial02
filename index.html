@@ -458,6 +458,7 @@
       <div class="topModes" aria-label="モードせんたく">
         <button id="practiceModeBtn" class="modeBtn active" type="button">れんしゅう</button>
         <button id="challengeModeBtn" class="modeBtn" type="button">30びょう</button>
+        <button id="noMissModeBtn" class="modeBtn" type="button">ノーミス</button>
       </div>
 
       <div class="stage">
@@ -509,6 +510,7 @@
 <script>
   const STORAGE_SOUND_KEY = "appleCountSoundOn";
   const STORAGE_BEST_KEY = "appleCountBest30";
+  const STORAGE_BEST_NM_KEY = "appleCountBestNoMiss";
 
   const CARD_IMAGES = [
     null,
@@ -532,6 +534,7 @@
     score: 0,
     misses: 0,
     best: Number(localStorage.getItem(STORAGE_BEST_KEY) || 0),
+    bestNoMiss: Number(localStorage.getItem(STORAGE_BEST_NM_KEY) || 0),
     soundOn: localStorage.getItem(STORAGE_SOUND_KEY) !== "off",
     timerId: null,
     nextId: null,
@@ -545,6 +548,7 @@
 
   const practiceModeBtn = document.getElementById("practiceModeBtn");
   const challengeModeBtn = document.getElementById("challengeModeBtn");
+  const noMissModeBtn = document.getElementById("noMissModeBtn");
 
   const controls = document.getElementById("controls");
   const mainBtn = document.getElementById("mainBtn");
@@ -634,6 +638,40 @@
   function setModeButtons() {
     practiceModeBtn.classList.toggle("active", state.mode === "practice");
     challengeModeBtn.classList.toggle("active", state.mode === "challenge");
+    noMissModeBtn.classList.toggle("active", state.mode === "nomiss");
+  }
+
+  function getCurrentBest() {
+    if (state.mode === "challenge") return state.best;
+    if (state.mode === "nomiss") return state.bestNoMiss;
+    return 0;
+  }
+
+  function setCurrentBest(value) {
+    if (state.mode === "challenge") {
+      state.best = value;
+      localStorage.setItem(STORAGE_BEST_KEY, String(value));
+    } else if (state.mode === "nomiss") {
+      state.bestNoMiss = value;
+      localStorage.setItem(STORAGE_BEST_NM_KEY, String(value));
+    }
+  }
+
+  function clearCurrentBest() {
+    if (state.mode === "challenge") {
+      state.best = 0;
+      localStorage.removeItem(STORAGE_BEST_KEY);
+    } else if (state.mode === "nomiss") {
+      state.bestNoMiss = 0;
+      localStorage.removeItem(STORAGE_BEST_NM_KEY);
+    }
+  }
+
+  function buildReadyMessage() {
+    if (state.mode === "nomiss") {
+      return { title: "ノーミス\nモード", sub: "ミスしたら おわり" };
+    }
+    return { title: "30びょう", sub: "スタートで はじめるよ" };
   }
 
   function updateSoundButton() {
@@ -772,7 +810,8 @@
     mainBtn.disabled = false;
     mainBtn.textContent = "スタート";
 
-    showMessage("30びょう", "スタートで はじめるよ");
+    const ready = buildReadyMessage();
+    showMessage(ready.title, ready.sub);
   }
 
   function setMode(mode) {
@@ -797,15 +836,18 @@
 
     setPadDisabled(true);
 
-    const isNewBest = state.score > state.best;
+    const isNewBest = state.score > getCurrentBest();
     if (isNewBest) {
-      state.best = state.score;
-      localStorage.setItem(STORAGE_BEST_KEY, String(state.best));
+      setCurrentBest(state.score);
     }
 
+    const firstLine = state.mode === "nomiss"
+      ? "ミスで しゅうりょう"
+      : `ミス ${state.misses}かい`;
+
     const subText = isNewBest
-      ? `ミス ${state.misses}かい\nベスト こうしん！`
-      : `ミス ${state.misses}かい\nベスト ${state.best}もん`;
+      ? `${firstLine}\nベスト こうしん！`
+      : `${firstLine}\nベスト ${getCurrentBest()}もん`;
 
     state.showResetButton = true;
     showMessage(`${state.score}もん\nできた！`, subText);
@@ -822,7 +864,6 @@
     state.challengeBusy = false;
     state.score = 0;
     state.misses = 0;
-    state.endAt = Date.now() + 30000;
     state.showResetButton = false;
 
     mainBtn.disabled = true;
@@ -831,11 +872,16 @@
     setPadDisabled(false);
     setProblem(pickProblem());
 
-    state.timerId = setInterval(() => {
-      if (Date.now() >= state.endAt) {
-        endChallenge();
-      }
-    }, 100);
+    if (state.mode === "challenge") {
+      state.endAt = Date.now() + 30000;
+      state.timerId = setInterval(() => {
+        if (Date.now() >= state.endAt) {
+          endChallenge();
+        }
+      }, 100);
+    } else {
+      state.endAt = Infinity;
+    }
   }
 
   function scheduleNextPractice(ms) {
@@ -904,10 +950,15 @@
       playCorrectSound();
       scheduleNextChallenge(180);
     } else {
-      state.misses += 1;
       shakeCard();
       playWrongSound();
-      unlockSameChallengeProblem(200);
+      if (state.mode === "nomiss") {
+        clearTimeout(state.nextId);
+        state.nextId = setTimeout(() => endChallenge(), 250);
+      } else {
+        state.misses += 1;
+        unlockSameChallengeProblem(200);
+      }
     }
   }
 
@@ -920,12 +971,14 @@
   }
 
   function resetBestRecord() {
-    state.best = 0;
-    localStorage.removeItem(STORAGE_BEST_KEY);
+    clearCurrentBest();
     state.showResetButton = false;
+    const firstLine = state.mode === "nomiss"
+      ? "ミスで しゅうりょう"
+      : `ミス ${state.misses}かい`;
     showMessage(
       `${state.score}もん\nできた！`,
-      `ミス ${state.misses}かい\nベストきろくを リセットしたよ`
+      `${firstLine}\nベストきろくを リセットしたよ`
     );
   }
 
@@ -936,7 +989,7 @@
   });
 
   mainBtn.addEventListener("click", () => {
-    if (state.mode === "challenge" && !state.challengeRunning) {
+    if (state.mode !== "practice" && !state.challengeRunning) {
       startChallenge();
     }
   });
@@ -957,6 +1010,12 @@
     }
   });
 
+  noMissModeBtn.addEventListener("click", () => {
+    if (state.mode !== "nomiss") {
+      setMode("nomiss");
+    }
+  });
+
   soundBtn.addEventListener("click", () => {
     state.soundOn = !state.soundOn;
     localStorage.setItem(STORAGE_SOUND_KEY, state.soundOn ? "on" : "off");
@@ -971,7 +1030,7 @@
       return;
     }
 
-    if (e.key === "Enter" && state.mode === "challenge" && !state.challengeRunning) {
+    if (e.key === "Enter" && state.mode !== "practice" && !state.challengeRunning) {
       startChallenge();
     }
   });
